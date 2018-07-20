@@ -1,6 +1,7 @@
 from pyraf import iraf
 from iraf import gemini, gmos
 from iraf import images, imutil
+from iraf import noao, onedspec
 
 class reduceSpectrum():
 	def __init__(self, rawIm, rawPath):
@@ -18,6 +19,8 @@ class reduceSpectrum():
 		qecorr="no", flat="no", fixpix="yes", vardq="no", biasPath="", \
 		flatPath="", refimPath="", imPath="", bpmPath="gmos$data/chipgaps.dat", \
 		logPath="", verbose="yes", frameNo=1):
+
+		print "RUNNING GSREDUCE"
 
 		# TODO: stash relevant task options in attributes [using dict of dicts?]
 		# self.options['gsreduce'] = {}
@@ -42,6 +45,8 @@ class reduceSpectrum():
 	def transform(self, image, lamRef, pref="t", vardq="no", logPath="", \
 		verbose="yes", frameNo=2):
 
+		print "RUNNING GSTRANSFORM"
+
 		# TODO: stash relevant task options in attributes
 
 		# next delete previous copy of the output (should it exist)
@@ -61,6 +66,10 @@ class reduceSpectrum():
 		order=1, low=2.5, high=2.5, inter="no", logPath="", verbose="yes", \
 		frameNo=3):
 
+		print "RUNNING GSSKYSUB"
+
+		# TODO: stash relevant task options in attributes
+
 		# next delete previous copy of the output (should it exit)
 		iraf.imdel(pref + image)
 
@@ -72,6 +81,30 @@ class reduceSpectrum():
 		image = pref + image
 		self.viewIm(image, frameNo=frameNo)
 		
+		return
+
+	# function to extract the spectrum from the reduced, transformed, 
+	# and sky-subtracted image
+	def extract(self, image, pref="e", apRef="", width=1., inter="no", \
+		center="yes", trace="yes", weights="none", vardq="no", logPath="", \
+		verbose="yes", view=False):
+
+		print "RUNNING GSEXTRACT"
+
+		# TODO: stash relevant task options in attributes
+
+		# next delete previous copy of the output (should it exit)
+		iraf.imdel(pref + image)
+
+		# run gsextract and view output (if directed)
+		iraf.gsextract(image, outpref=pref, refimages=apRef, apwidth=width, \
+			fl_inter=inter, recenter=center, trace=trace, weights=weights, \
+			fl_vardq=vardq, logfile=logPath, verbose=verbose)		
+
+		if view:
+			image = pref + image + "[sci]"
+			iraf.splot(image)
+
 		return
 
 
@@ -105,6 +138,18 @@ if __name__ == "__main__":
 	pref = "s1"
 	sample = "20:500,1800:2280"
 	n7078_spec.skysub(image, pref=pref, vardq="yes", sample=sample, order=5, \
-		high=1., inter="yes", logPath=log, verbose="no")
+		high=1., inter="no", logPath=log, verbose="no")
 	image = pref + image
+
+	# extract cluster spectrum
+	# start by tracing position of a bright star as a function of wavelength
+	weights = "variance"
+	n7078_spec.extract(image, inter="yes", weights=weights, logPath=log)
+
+	# next set up the first cluster aperture based on the trace of the star 
+	pref = "e1"
+	apRef = image
+	n7078_spec.extract(image, pref=pref, apRef=apRef, width=10., inter="yes", \
+		center="no", trace="no", weights=weights, vardq="yes", logPath=log, \
+		verbose="no", view=True)
 
