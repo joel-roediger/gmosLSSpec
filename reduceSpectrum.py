@@ -14,17 +14,21 @@ class reduceSpectrum():
 	def viewIm(self, image, frameNo=1):
 		iraf.gdisplay(image, frame=frameNo)
 
-	# function to reduce the raw spectroscopic image and view the result
-	def reduce(self, image, pref="gs", bias="no", gscrrej="no", crspec="no", \
-		qecorr="no", flat="no", fixpix="yes", vardq="no", biasPath="", \
-		flatPath="", refimPath="", imPath="", bpmPath="gmos$data/chipgaps.dat", \
-		logPath="", verbose="yes", frameNo=1):
+	# function to reduce the raw spectroscopic image
+	# def reduce(self, image, pref="gs", bias="no", gscrrej="no", crspec="no", \
+	# 	qecorr="no", flat="no", fixpix="yes", vardq="no", biasPath="", \
+	#	flatPath="", refimPath="", imPath="", bpmPath="gmos$data/chipgaps.dat", \
+	#	logPath="", verbose="yes", frameNo=1):
+	def reduce(self, image, **kwargs):
 
 		print "RUNNING GSREDUCE"
 
 		# TODO: stash relevant task options in attributes [using dict of dicts?]
-		# self.options['gsreduce'] = {}
-		# self.options['gsreduce'][...] = ...
+		self.options['gsreduce'] = {}
+		for kwarg in kwargs:
+			self.options['gsreduce'][kwarg] = kwargs[kwarg]
+		print self.options
+		return
 
 		# next delete previous copies of the output (should they exist)
 		iraf.imdel("g" + image)
@@ -101,6 +105,7 @@ class reduceSpectrum():
 			fl_inter=inter, recenter=center, trace=trace, weights=weights, \
 			fl_vardq=vardq, logfile=logPath, verbose=verbose)		
 
+		# TODO: change 'view' to 'viewSpec' and move splot call to separate fcn
 		if view:
 			image = pref + image + "[sci]"
 			iraf.splot(image)
@@ -126,6 +131,7 @@ if __name__ == "__main__":
 		fixpix="no", vardq="yes", biasPath=biasIm, flatPath=flatIm, \
 		imPath=imPath, logPath=log, verbose="no")
 	image = pref + image
+	exit()
 
 	# apply the wavelength solution to the reduced image and view output
 	pref = "t"
