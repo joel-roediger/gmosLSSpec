@@ -8,23 +8,34 @@ class reduceSpectrum():
 		self.rawIm = rawIm
 		self.rawPath = rawPath
 		self.options = {}
-		# print "Working on image " + self.rawIm
 
 	# function to view image within ds9
 	def viewIm(self, image, frameNo=1):
 		iraf.gdisplay(image, frame=frameNo)
 
-	# function to reduce the raw spectroscopic image and view the result
+		return
+
+	# function to stash settings used to run any given task
+	def stashSettings(self, task, **kwargs):
+		self.options[task] = {}
+		for kwarg in kwargs:
+			self.options[task][kwarg] = kwargs[kwarg]
+
+		return
+
+	# function to reduce the raw spectroscopic image
 	def reduce(self, image, pref="gs", bias="no", gscrrej="no", crspec="no", \
-		qecorr="no", flat="no", fixpix="yes", vardq="no", biasPath="", \
+	 	qecorr="no", flat="no", fixpix="yes", vardq="no", biasPath="", \
 		flatPath="", refimPath="", imPath="", bpmPath="gmos$data/chipgaps.dat", \
 		logPath="", verbose="yes", frameNo=1):
 
 		print "RUNNING GSREDUCE"
 
-		# TODO: stash relevant task options in attributes [using dict of dicts?]
-		# self.options['gsreduce'] = {}
-		# self.options['gsreduce'][...] = ...
+		# stash task settings
+		self.stashSettings('gsreduce', outpref=pref, fl_bias=bias, \
+			bias=biasPath, fl_flat=flat, flatim=flatPath, fl_qecorr=qecorr, \
+			qe_refim=refimPath, fl_gscrrej=gscrrej, fl_crspec=crspec, \
+			fl_fixpix=fixpix, fl_vardq=vardq, bpm=bpmPath, logfile=logPath)
 
 		# next delete previous copies of the output (should they exist)
 		iraf.imdel("g" + image)
@@ -47,7 +58,9 @@ class reduceSpectrum():
 
 		print "RUNNING GSTRANSFORM"
 
-		# TODO: stash relevant task options in attributes
+		# stash task settings
+		self.stashSettings('gstransform', outpref=pref, wavtraname=lamRef, \
+			fl_vardq=vardq, logfile=logPath)
 
 		# next delete previous copy of the output (should it exist)
 		iraf.imdel(pref + image)
@@ -68,7 +81,10 @@ class reduceSpectrum():
 
 		print "RUNNING GSSKYSUB"
 
-		# TODO: stash relevant task options in attributes
+		# stash task settings
+		self.stashSettings('gsskysub', outpref=pref, fl_vardq=vardq, \
+			long_sample=sample, function=func, order=order, low_rej=low, \
+			high_rej=high, fl_inter=inter, logfile=logPath)
 
 		# next delete previous copy of the output (should it exit)
 		iraf.imdel(pref + image)
@@ -91,7 +107,10 @@ class reduceSpectrum():
 
 		print "RUNNING GSEXTRACT"
 
-		# TODO: stash relevant task options in attributes
+		# stash task settings
+		self.stashSettings('gsextract', outpref=pref, refimages=apRef, \
+			apwidth=width, fl_inter=inter, recenter=center, trace=trace, \
+			weights=weights, fl_vardq=vardq, logfile=logPath)
 
 		# next delete previous copy of the output (should it exit)
 		iraf.imdel(pref + image)
@@ -101,6 +120,7 @@ class reduceSpectrum():
 			fl_inter=inter, recenter=center, trace=trace, weights=weights, \
 			fl_vardq=vardq, logfile=logPath, verbose=verbose)		
 
+		# TODO: change 'view' to 'viewSpec' and move splot call to separate fcn
 		if view:
 			image = pref + image + "[sci]"
 			iraf.splot(image)
@@ -116,40 +136,45 @@ if __name__ == "__main__":
 	log = "reduceTarget_n7078_S0120.log"
 
 	# create instance of the reduceSpectrum class
-	n7078_spec = reduceSpectrum(image, imPath)
+	n7078_850_q10 = reduceSpectrum(image, imPath)
 
 	# reduce the raw spectroscopic image and view output
 	pref = "gs"
 	biasIm = "data/bias_N20120928-1010.fits"
 	flatIm = "data/flat_850_N20121004_v2.fits"
-	n7078_spec.reduce(image, pref=pref, bias="yes", crspec="yes", flat="yes", \
-		fixpix="no", vardq="yes", biasPath=biasIm, flatPath=flatIm, \
+	n7078_850_q10.reduce(image, pref=pref, bias="yes", crspec="yes", \
+		flat="yes", fixpix="no", vardq="yes", biasPath=biasIm, flatPath=flatIm, \
 		imPath=imPath, logPath=log, verbose="no")
 	image = pref + image
 
 	# apply the wavelength solution to the reduced image and view output
 	pref = "t"
 	lamRef = "gsN20121004S0855"
-	n7078_spec.transform(image, lamRef, pref=pref, vardq="yes", logPath=log, \
+	n7078_850_q10.transform(image, lamRef, pref=pref, vardq="yes", logPath=log, \
 		verbose="no")
 	image = pref + image
 
 	# remove sky lines and continuum from the reduced image and view output
 	pref = "s1"
 	sample = "20:500,1800:2280"
-	n7078_spec.skysub(image, pref=pref, vardq="yes", sample=sample, order=5, \
+	n7078_850_q10.skysub(image, pref=pref, vardq="yes", sample=sample, order=5, \
 		high=1., inter="no", logPath=log, verbose="no")
 	image = pref + image
 
 	# extract cluster spectrum
 	# start by tracing position of a bright star as a function of wavelength
 	weights = "variance"
-	n7078_spec.extract(image, inter="yes", weights=weights, logPath=log)
+	n7078_850_q10.extract(image, inter="yes", weights=weights, logPath=log)
 
 	# next set up the first cluster aperture based on the trace of the star 
 	pref = "e1"
 	apRef = image
-	n7078_spec.extract(image, pref=pref, apRef=apRef, width=10., inter="yes", \
-		center="no", trace="no", weights=weights, vardq="yes", logPath=log, \
-		verbose="no", view=True)
+	n7078_850_q10.extract(image, pref=pref, apRef=apRef, width=10., \
+		inter="yes", center="no", trace="no", weights=weights, vardq="yes", \
+		logPath=log, verbose="no", view=True)
+
+	# sanity check on stashed keywords
+	print ''
+	for key in n7078_850_q10.options.keys():
+		print key, n7078_850_q10.options[key]
 
