@@ -26,29 +26,34 @@ class ReduceIfuObj():
 
 	# function to mask cosmetics in exposures
 	def adjustDQ(self, inIm, ext, txtMask):
-		# TODO: allow user to set value of ext
 
-		print "\nADJUSTING MASK FOR " + inIm
+		# allow user to dynamically declare the extension
+		#ext = str(raw_input("\nWhich extension needs masking? (EXTNAME,EXTVER): "))
+		#ext = "[" + ext + "]"
+
+		print "\nADJUSTING MASK FOR " + inIm + ext.upper()
 		
 		# grab dimensions of mask from header of image
+		# TODO: does expression for num need to be generalized to one-slit case?
 		hdul = fits.open(inIm)
 		num = 3 * (int(ext[-2]) - 1) + 2
 		xDim = hdul[num].header["NAXIS1"]
 		yDim = hdul[num].header["NAXIS2"]
 
+		# display input image
+		iraf.display(inIm + ext)
+
 		# allow user to adjust mask iteratively
-		iraf.delete(txtMask)
 		while True:
+
+			os.system("rm -iv " + txtMask)
+			
 			# ask user to input coordinate ranges to mask
 			fixDQ = bool(input("\nDoes mask need improvement? (True/False): "))
 			if fixDQ:
-				#xRange = raw_input("X coord range to be masked (space-separated): ")
-				#yRange = raw_input("Y coord range to be masked (space-separated): ")
-				#cmd = "echo '" + xRange + " " + yRange + "' >> " + txtMask
-
 				ranges = raw_input("Coord ranges to be masked (space-separated): ")
-				cmd = "echo '" + ranges + "' >> txtMask"
-				print cmd
+				cmd = "echo '" + ranges + "' >> " + txtMask
+				#print cmd
 				os.system(cmd)
 			else:
 				break
