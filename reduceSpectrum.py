@@ -15,6 +15,12 @@ class reduceSpectrum():
 
 		return
 
+	# function to view and interact with an extracted spectrum
+	def viewSpec(self, image):
+		iraf.splot(image)
+
+		return
+
 	# function to stash settings used to run any given task
 	def stashSettings(self, task, **kwargs):
 		self.options[task] = {}
@@ -120,10 +126,9 @@ class reduceSpectrum():
 			fl_inter=inter, recenter=center, trace=trace, weights=weights, \
 			fl_vardq=vardq, logfile=logPath, verbose=verbose)		
 
-		# TODO: change 'view' to 'viewSpec' and move splot call to separate fcn
 		if view:
 			image = pref + image + "[sci]"
-			iraf.splot(image)
+			self.viewSpec(image)
 
 		return
 
