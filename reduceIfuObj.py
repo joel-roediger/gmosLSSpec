@@ -45,12 +45,11 @@ class ReduceIfuObj():
 
 		# allow user to adjust mask iteratively
 		while True:
-
-			os.system("rm -iv " + txtMask)
 			
 			# ask user to input coordinate ranges to mask
 			fixDQ = bool(input("\nDoes mask need improvement? (True/False): "))
 			if fixDQ:
+				os.system("rm -iv " + txtMask)
 				ranges = raw_input("Coord ranges to be masked (space-separated): ")
 				cmd = "echo '" + ranges + "' >> " + txtMask
 				#print cmd
