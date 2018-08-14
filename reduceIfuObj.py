@@ -10,9 +10,11 @@ from iraf import stsdas, analysis, gasp
 from astropy.io import fits
 
 class ReduceIfuObj():
-	def __init__(self, imList, rawPath="", calPath="", biasIm="", flatList="", \
-		mdf=""):
+	def __init__(self, imList, steps, rawPath="./", calPath="", mdf="", \
+		biasIm="", flatList="", arcDir="", arcList="", logRoot=""):
 		
+		self.steps = steps
+
 		self.rawPath = rawPath
 		self.calPath = calPath
 
@@ -20,7 +22,12 @@ class ReduceIfuObj():
 		self.mdf = mdf
 		self.imList = imList
 
+		self.arcDir = arcDir
+		self.arcList = arcList
+
 		self.flats = utils.getImPaths(flatList)
+
+		self.logRoot = logRoot
 
 		return
 
@@ -122,95 +129,115 @@ class ReduceIfuObj():
 
 		return
 
-	# function to demo the pipeline
-	def demo(self):
+	# function to run the pipeline following the steps in K Labrie's tutorial
+	def run(self):
 
 		imPaths = utils.getImPaths(self.imList)
 		
 		for i, im in enumerate(imPaths):
 			# attach MDF, subtract the bias+overscan, and trim the overscan
-			logFile = "v1895_sci_reduceIm.log"
-			#self.reduceIm(im, rawpath=self.rawPath, slits="both", \
-			#	fl_over="yes", fl_trim="yes", fl_gscrrej="no", fl_wavtran="no", \
-			#	fl_skysub="no", fl_extract="no", fl_fluxcal="no", \
-			#	fl_inter="no", fl_vardq="yes", bias=self.bias, \
-			#	mdffile=self.mdf, mdfdir="./", logfile=logFile, verbose="no")
-
+			if self.steps["reduceIm"]:
+				logFile = self.logRoot + "_reduceIm.log"
+				# TODO: remove hard-coding of slits and mdfdir parms
+				self.reduceIm(im, rawpath=self.rawPath, slits="both", \
+					fl_over="yes", fl_trim="yes", fl_gscrrej="no", \
+					fl_wavtran="no", fl_skysub="no", fl_extract="no", \
+					fl_fluxcal="no", fl_inter="no", fl_vardq="yes", \
+					bias=self.bias, mdffile=self.mdf, mdfdir="./", \
+					logfile=logFile, verbose="no")
 
 			# model and subtract the scattered light
-			#self.subtractScat("rg" + im, self.calPath + "blkmask_" + \
-			#	self.flats[i], prefix = "b", fl_inter="yes", cross="yes")
-
+			if self.steps["subScatLgt"]:
+				self.subtractScat("rg" + im, self.calPath + "blkMask_" + \
+					self.flats[i], prefix = "b", fl_inter="yes", cross="yes")
 
 			# clean the cosmic rays
-			logFile = "v1895_sci_cleanCRs.log"
-			#self.cleanCRs("brg" + im, fl_vardq="yes", xorder=9, yorder=-1, \
-			#	sigclip=4.5, sigfrac=0.5, objlim=1.0, niter=4, \
-			#	key_ron="RDNOISE", key_gain="GAIN", logfile=logFile, \
-			#	verbose="yes")
-
+			if self.steps["cleanCosRays"]:
+				logFile = self.logRoot + "_cleanCosRays.log"
+				self.cleanCRs("brg" + im, fl_vardq="yes", xorder=9, yorder=-1, \
+					sigclip=4.5, sigfrac=0.5, objlim=1.0, niter=4, \
+					key_ron="RDNOISE", key_gain="GAIN", logfile=logFile, \
+					verbose="no")
 
 			# correct for QE changes
-			logFile = "v1895_sci_corrQE.log"
-			arc = utils.matchCentWave(im, self.rawPath, "arcFiles.txt", "arc/")
-			refIm = "erg" + arc
-			#os.system("mv " + self.calPath + refIm + " ./")
+			if self.steps["correctQE"]:
+				logFile = self.logRoot + "_correctQE.log"
 
-			#self.correctQE("xbrg" + im, refimages=refIm, fl_correct="yes", \
-			#	fl_vardq="yes", logfile=logFile, verbose="yes")
+				# retrieve arc of matching central wavelength
+				arc = utils.matchCentWave(im, self.rawPath, self.arcList, "arc/")
+				refIm = "erg" + arc
+				os.system("mv " + self.calPath + refIm + " ./")
 
-			#os.system("mv " + refIm + " " + self.calPath)
+				self.correctQE("xbrg" + im, refimages=refIm, fl_correct="yes", \
+					fl_vardq="yes", logfile=logFile, verbose="no")
 
+				# return arc from whence it came
+				os.system("mv " + refIm + " " + self.calPath)
 
 			# extract the spectra
-			logFile = "v1895_sci_extractSpec.log"
-			flat = self.flats[i]
-			refIm = "eqbrg" + flat
-			respIm = self.calPath + flat[:flat.find(".")] + "_resp.fits"
-			#os.system("mv " + self.calPath + refIm + " ./")
+			if self.steps["extractSpec"]:
+				logFile = self.logRoot + "_extractSpec.log"
 
-			#self.extractSpec("qxbrg" + im, reference=refIm, response=respIm, \
-			#	fl_inter="no", fl_vardq="yes", recenter="no", trace="no", \
-			#	weights="none", logfile=logFile, verbose="no")
+				# retrieve flat of matching central wavelength
+				# TODO: set flat through call to matchCentWave?
+				flat = self.flats[i]
+				refIm = "eqbrg" + flat
+				os.system("mv " + self.calPath + refIm + " ./")
 
-			#os.system("mv " + refIm + " " + self.calPath)
+				respIm = self.calPath + flat[:flat.find(".")] + "_resp.fits"
 
+				self.extractSpec("qxbrg" + im, reference=refIm, \
+					response=respIm, fl_inter="no", fl_vardq="yes", \
+					recenter="no", trace="no", weights="none", logfile=logFile, \
+					verbose="no")
+				
+				# return flat from whence it came
+				os.system("mv " + refIm + " " + self.calPath)
 
-			# view extracted spectra in detector plane
 			# TODO: place this in extractSpec
-			for j in range(1, 3):
-				#print "\nDISPLAYING eqxbrg" + im + "[SCI," + str(j) + "]"
-				#iraf.display("eqxbrg" + im + "[SCI," + str(j) + "]")
-				continue
+			# view extracted spectra in detector plane
+			#for j in range(1, 3):
+			#	print "\nDISPLAYING eqxbrg" + im + "[SCI," + str(j) + "]"
+			#	iraf.display("eqxbrg" + im + "[SCI," + str(j) + "]")
+			#	continue
 
 			# adjust the mask to cover cosmetics
-			#self.adjustDQ("eqxbrg" + im, "[SCI,2]", "badColMask.txt")
+			if self.steps["maskSpec"]:
+				hdu = fits.open("eqxbrg" + im)
 
+				# create a separate mask for each science extension
+				for j in range(1, hdu[-1].header["EXTVER"] + 1):
+					txtMask = "mask_" + im[:im.find(".")] + "_" + str(j) + ".txt"
+					ext = "[SCI," + str(j) + "]"
+					self.adjustDQ("eqxbrg" + im, ext, txtMask)
 
 			# rectify the extracted spectra
-			logFile = "v1895_sci_rectifySpec.log"
-			refIm = "erg" + arc
-			#os.system("mv " + self.calPath + refIm + " ./")
+			if self.steps["rectifySpec"]:
+				logFile = self.logRoot + "_rectifySpec.log"
 
-			# use first spectra to inform choice of final wavelength sampling
-			#print "\nRECTIFYING SPECTRA IN", "xeqxbrg" + im
-			#if i == 0:
-			#	self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
-			#		fl_vardq="no", dw="INDEF", logfile=logFile, verbose="no")
-			#	pass
+				# retrieve arc of matching central wavelength
+				arc = utils.matchCentWave(im, self.rawPath, self.arcList, "arc/")
+				refIm = "erg" + arc
+				os.system("mv " + self.calPath + refIm + " ./")
 
-			#dw = input("Desired wavelength sampling: ")
-			#self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, fl_vardq="yes", \
-			#	dw=dw, logfile=logFile, verbose="no")
+				# use first spectra to inform choice of final wavelength sampling
+				print "\nRECTIFYING SPECTRA IN", "xeqxbrg" + im
+				if i == 0:
+					self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
+						fl_vardq="no", dw="INDEF", logfile=logFile, verbose="no")
 
-			#os.system("mv " + refIm + " " + self.calPath)
+				dw = input("Desired wavelength sampling: ")
+				self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
+					fl_vardq="yes", dw=dw, logfile=logFile, verbose="no")
 
+				# return arc from whence it came
+				os.system("mv " + refIm + " " + self.calPath)
 
 			# subtract the sky from the object fibers
-			logFile = "v1895_sci_subtractSky.log"
-			#self.subtractSky("txeqxbrg" + im, fl_inter="no", logfile=logFile, \
-			#	verbose="yes")
-
+			if self.steps["subtractSky"]:
+				logFile = self.logRoot + "_subtractSky.log"
+				self.subtractSky("txeqxbrg" + im, fl_inter="no", \
+					logfile=logFile, verbose="yes")
 			
 			# ...
 
@@ -360,6 +387,23 @@ class ReduceIfuObj():
 
 if __name__ == "__main__":
 
-	v1895_sci = ReduceIfuObj("targetFiles.txt", biasIm="v1895_masterBias.fits", \
-		flatList="flatFiles.txt", mdf="gsifu_slits_mdf.fits")
+	# set root filename of logs
+	logRoot = "v1895_sci"
+
+	# declare which steps of pipeline to execute
+	pipeSteps = {}
+	pipeSteps["reduceIm"] = False
+	pipeSteps["subScatLgt"] = False
+	pipeSteps["cleanCosRays"] = False
+	pipeSteps["correctQE"] = False
+	pipeSteps["extractSpec"] = False
+	pipeSteps["maskSpec"] = False
+	pipeSteps["rectifySpec"] = False
+	pipeSteps["subtractSky"] = False
+
+	# setup object for VCC1895 and run pipeline 
+	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
+		rawPath="target/", calPath="calibrations/", mdf="gsifu_slits_mdf.fits", \
+		biasIm="v1895_masterBias.fits", flatList="flatFiles.txt", \
+		arcDir="arc/", arcList="arcFiles.txt", logRoot=logRoot)
 	v1895_sci.run()
