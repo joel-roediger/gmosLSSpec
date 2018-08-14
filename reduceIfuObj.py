@@ -35,10 +35,11 @@ class ReduceIfuObj():
 		
 		# grab dimensions of mask from header of image
 		# TODO: does expression for num need to be generalized to one-slit case?
-		hdul = fits.open(inIm)
+		hdu = fits.open(inIm)
 		num = 3 * (int(ext[-2]) - 1) + 2
-		xDim = hdul[num].header["NAXIS1"]
-		yDim = hdul[num].header["NAXIS2"]
+		xDim = hdu[num].header["NAXIS1"]
+		yDim = hdu[num].header["NAXIS2"]
+		hdu.close()
 
 		# display input image
 		iraf.display(inIm + ext)
@@ -81,17 +82,37 @@ class ReduceIfuObj():
 	# function to clean cosmic ray hits from exposures
 	def cleanCRs(self, inIm, pref="x", **kwargs):
 
-		print "\nCLEANING COSMIC RAYS FROM", inIm
+		print "\nCLEANING COSMIC RAYS FROM " + inIm
 
 		iraf.imdelete(pref + inIm)
 		iraf.gemcrspec(inIm, pref + inIm, **kwargs)
 
 		return
 
+	# function to compute sensitivity function b/o observed flux standard
+	def compSensFunc(self, inIm, **kwargs):
+
+		print "\nCOMPUTING SENSITIVITY FUNCTION FROM " + inIm
+
+		suffStart = inIm.find(".")
+		date = inIm[suffStart - 13:suffStart - 5]
+
+		hdu = fits.open(inIm)
+		tgtName = hdu[0].header["OBJECT"]
+		centWave = str(int(hdu[0].header["CENTWAVE"]))
+		hdu.close()
+
+		outFlux = tgtName + "_" + centWave + "_" + date + "_flux.txt"
+		sFunc = tgtName + "_" + centWave + "_" + date + "_sFunc"
+
+		iraf.gsstandard(inIm, sfile=outFlux, sfunction=sFunc, **kwargs)
+
+		return
+
 	# function to correct exposures for QE changes between CCD chips
 	def correctQE(self, inIm, **kwargs):
 
-		print "\nCORRECTING QE IN", inIm
+		print "\nCORRECTING QE IN " + inIm
 
 		# delete previous correction data and QE-corrected exposure
 		iraf.imdelete("q" + inIm)
