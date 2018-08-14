@@ -307,10 +307,25 @@ class ReduceIfuObj():
 		# delete previous sky-subtracted spectra
 		iraf.imdelete("s" + inIm)
 
-		# subtract the sky and view the result (as an image and datacube)
+		# subtract the sky and view the result (as image and datacube)
 		iraf.gfskysub(inIm, **kwargs)
 		iraf.display("s" + inIm + "[SCI]")
 		self.viewCube("s" + inIm, extname="SCI", version="1")
+
+		return
+
+	# function to sum all the spectra from a datacube into one
+	def sumFibers(self, inIm, **kwargs):
+
+		print "\nSUMMING FIBERS FROM " + inIm
+
+		# delete ...
+		# TODO: add attribute to class to turn imdelete verifications on/off
+		iraf.imdelete("a" + inIm)
+
+		# sum the fibers and view the final spectrum
+		iraf.gfapsum(inIm, **kwargs)
+		iraf.splot("a" + inIm + "[SCI,1]")
 
 		return
 
