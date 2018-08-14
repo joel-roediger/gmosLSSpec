@@ -101,6 +101,103 @@ class ReduceIfuObj():
 
 		return
 
+	# function to demo the pipeline
+	def demo(self):
+
+		imPaths = utils.getImPaths(self.imList)
+		
+		for i, im in enumerate(imPaths):
+			# attach MDF, subtract the bias+overscan, and trim the overscan
+			logFile = "v1895_sci_reduceIm.log"
+			#self.reduceIm(im, rawpath=self.rawPath, slits="both", \
+			#	fl_over="yes", fl_trim="yes", fl_gscrrej="no", fl_wavtran="no", \
+			#	fl_skysub="no", fl_extract="no", fl_fluxcal="no", \
+			#	fl_inter="no", fl_vardq="yes", bias=self.bias, \
+			#	mdffile=self.mdf, mdfdir="./", logfile=logFile, verbose="no")
+
+
+			# model and subtract the scattered light
+			#self.subtractScat("rg" + im, self.calPath + "blkmask_" + \
+			#	self.flats[i], prefix = "b", fl_inter="yes", cross="yes")
+
+
+			# clean the cosmic rays
+			logFile = "v1895_sci_cleanCRs.log"
+			#self.cleanCRs("brg" + im, fl_vardq="yes", xorder=9, yorder=-1, \
+			#	sigclip=4.5, sigfrac=0.5, objlim=1.0, niter=4, \
+			#	key_ron="RDNOISE", key_gain="GAIN", logfile=logFile, \
+			#	verbose="yes")
+
+
+			# correct for QE changes
+			logFile = "v1895_sci_corrQE.log"
+			arc = utils.matchCentWave(im, self.rawPath, "arcFiles.txt", "arc/")
+			refIm = "erg" + arc
+			#os.system("mv " + self.calPath + refIm + " ./")
+
+			#self.correctQE("xbrg" + im, refimages=refIm, fl_correct="yes", \
+			#	fl_vardq="yes", logfile=logFile, verbose="yes")
+
+			#os.system("mv " + refIm + " " + self.calPath)
+
+
+			# extract the spectra
+			logFile = "v1895_sci_extractSpec.log"
+			flat = self.flats[i]
+			refIm = "eqbrg" + flat
+			respIm = self.calPath + flat[:flat.find(".")] + "_resp.fits"
+			#os.system("mv " + self.calPath + refIm + " ./")
+
+			#self.extractSpec("qxbrg" + im, reference=refIm, response=respIm, \
+			#	fl_inter="no", fl_vardq="yes", recenter="no", trace="no", \
+			#	weights="none", logfile=logFile, verbose="no")
+
+			#os.system("mv " + refIm + " " + self.calPath)
+
+
+			# view extracted spectra in detector plane
+			# TODO: place this in extractSpec
+			for j in range(1, 3):
+				#print "\nDISPLAYING eqxbrg" + im + "[SCI," + str(j) + "]"
+				#iraf.display("eqxbrg" + im + "[SCI," + str(j) + "]")
+				continue
+
+			# adjust the mask to cover cosmetics
+			#self.adjustDQ("eqxbrg" + im, "[SCI,2]", "badColMask.txt")
+
+
+			# rectify the extracted spectra
+			logFile = "v1895_sci_rectifySpec.log"
+			refIm = "erg" + arc
+			#os.system("mv " + self.calPath + refIm + " ./")
+
+			# use first spectra to inform choice of final wavelength sampling
+			#print "\nRECTIFYING SPECTRA IN", "xeqxbrg" + im
+			#if i == 0:
+			#	self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
+			#		fl_vardq="no", dw="INDEF", logfile=logFile, verbose="no")
+			#	pass
+
+			#dw = input("Desired wavelength sampling: ")
+			#self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, fl_vardq="yes", \
+			#	dw=dw, logfile=logFile, verbose="no")
+
+			#os.system("mv " + refIm + " " + self.calPath)
+
+
+			# subtract the sky from the object fibers
+			logFile = "v1895_sci_subtractSky.log"
+			#self.subtractSky("txeqxbrg" + im, fl_inter="no", logfile=logFile, \
+			#	verbose="yes")
+
+			
+			# ...
+
+
+			continue
+
+		return
+
 	# function to extract spectra from the fibers and build a datacube
 	def extractSpec(self, inIm, **kwargs):
 
@@ -116,7 +213,7 @@ class ReduceIfuObj():
 
 		return
 
-	# function to ...
+	# function to rectify IFU spectra using established wavelength calibration
 	def rectifySpec(self, inIm, **kwargs):
 
 		# remove previous rectified spectra
@@ -214,103 +311,6 @@ class ReduceIfuObj():
 		iraf.gfskysub(inIm, **kwargs)
 		iraf.display("s" + inIm + "[SCI]")
 		self.viewCube("s" + inIm, extname="SCI", version="1")
-
-		return
-
-	# function to demo the pipeline
-	def demo(self):
-
-		imPaths = utils.getImPaths(self.imList)
-		
-		for i, im in enumerate(imPaths):
-			# attach MDF, subtract the bias+overscan, and trim the overscan
-			logFile = "v1895_sci_reduceIm.log"
-			#self.reduceIm(im, rawpath=self.rawPath, slits="both", \
-			#	fl_over="yes", fl_trim="yes", fl_gscrrej="no", fl_wavtran="no", \
-			#	fl_skysub="no", fl_extract="no", fl_fluxcal="no", \
-			#	fl_inter="no", fl_vardq="yes", bias=self.bias, \
-			#	mdffile=self.mdf, mdfdir="./", logfile=logFile, verbose="no")
-
-
-			# model and subtract the scattered light
-			#self.subtractScat("rg" + im, self.calPath + "blkmask_" + \
-			#	self.flats[i], prefix = "b", fl_inter="yes", cross="yes")
-
-
-			# clean the cosmic rays
-			logFile = "v1895_sci_cleanCRs.log"
-			#self.cleanCRs("brg" + im, fl_vardq="yes", xorder=9, yorder=-1, \
-			#	sigclip=4.5, sigfrac=0.5, objlim=1.0, niter=4, \
-			#	key_ron="RDNOISE", key_gain="GAIN", logfile=logFile, \
-			#	verbose="yes")
-
-
-			# correct for QE changes
-			logFile = "v1895_sci_corrQE.log"
-			arc = utils.matchCentWave(im, self.rawPath, "arcFiles.txt", "arc/")
-			refIm = "erg" + arc
-			#os.system("mv " + self.calPath + refIm + " ./")
-
-			#self.correctQE("xbrg" + im, refimages=refIm, fl_correct="yes", \
-			#	fl_vardq="yes", logfile=logFile, verbose="yes")
-
-			#os.system("mv " + refIm + " " + self.calPath)
-
-
-			# extract the spectra
-			logFile = "v1895_sci_extractSpec.log"
-			flat = self.flats[i]
-			refIm = "eqbrg" + flat
-			respIm = self.calPath + flat[:flat.find(".")] + "_resp.fits"
-			#os.system("mv " + self.calPath + refIm + " ./")
-
-			#self.extractSpec("qxbrg" + im, reference=refIm, response=respIm, \
-			#	fl_inter="no", fl_vardq="yes", recenter="no", trace="no", \
-			#	weights="none", logfile=logFile, verbose="no")
-
-			#os.system("mv " + refIm + " " + self.calPath)
-
-
-			# view extracted spectra in detector plane
-			# TODO: place this in extractSpec
-			for j in range(1, 3):
-				#print "\nDISPLAYING eqxbrg" + im + "[SCI," + str(j) + "]"
-				#iraf.display("eqxbrg" + im + "[SCI," + str(j) + "]")
-				continue
-
-			# adjust the mask to cover cosmetics
-			#self.adjustDQ("eqxbrg" + im, "[SCI,2]", "badColMask.txt")
-
-
-			# rectify the extracted spectra
-			logFile = "v1895_sci_rectifySpec.log"
-			refIm = "erg" + arc
-			#os.system("mv " + self.calPath + refIm + " ./")
-
-			# use first spectra to inform choice of final wavelength sampling
-			#print "\nRECTIFYING SPECTRA IN", "xeqxbrg" + im
-			#if i == 0:
-			#	self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
-			#		fl_vardq="no", dw="INDEF", logfile=logFile, verbose="no")
-			#	pass
-
-			#dw = input("Desired wavelength sampling: ")
-			#self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, fl_vardq="yes", \
-			#	dw=dw, logfile=logFile, verbose="no")
-
-			#os.system("mv " + refIm + " " + self.calPath)
-
-
-			# subtract the sky from the object fibers
-			logFile = "v1895_sci_subtractSky.log"
-			#self.subtractSky("txeqxbrg" + im, fl_inter="no", logfile=logFile, \
-			#	verbose="yes")
-
-			
-			# ...
-
-
-			continue
 
 		return
 
