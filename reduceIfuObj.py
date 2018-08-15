@@ -44,7 +44,7 @@ class ReduceIfuObj():
 		print "\nADJUSTING MASK FOR " + inIm + ext.upper()
 		
 		# grab dimensions of mask from header of image
-		# TODO: does expression for num need to be generalized to one-slit case?
+		# TODO: will expression for num work in one-slit case?
 		hdu = fits.open(inIm)
 		num = 3 * (int(ext[-2]) - 1) + 2
 		xDim = hdu[num].header["NAXIS1"]
@@ -63,7 +63,6 @@ class ReduceIfuObj():
 				os.system("rm -iv " + txtMask)
 				ranges = raw_input("Coord ranges to be masked (space-separated): ")
 				cmd = "echo '" + ranges + "' >> " + txtMask
-				#print cmd
 				os.system(cmd)
 			else:
 				break
@@ -79,10 +78,15 @@ class ReduceIfuObj():
 			iraf.copy(inIm, "tmp_" + inIm)
 			iraf.fixpix("tmp_" + inIm + ext, plMask, linterp="1,2,3,4")
 			iraf.copy("tmp_" + inIm, "x" + inIm)
+			# TODO: prevent overwrite of OBJECT card for DQ plane
 			iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], \
 				"tmpdq_" + inIm)
+			print plMask, "+", "x" + inIm + "[DQ," + ext[-2:], \
+				"tmpdq_" + inIm
 			iraf.imcopy("tmpdq_" + inIm + "[0]", "x" + inIm + "[DQ," + \
 				ext[-2:-1] + ",overwrite]")
+			print "tmpdq_" + inIm + "[0]", "x" + inIm + "[DQ," + \
+				ext[-2:-1] + ",overwrite]"
 
 			# display result
 			iraf.display("x" + inIm + ext)
@@ -234,6 +238,26 @@ class ReduceIfuObj():
 
 		return
 
+	# function to resample a data cube onto a regular 3D grid
+	def resampCube(self, inIm, **kwargs):
+
+		print "\nRESAMPLING DATA CUBE IN " + inIm
+
+		# determine name of output and delete previous version (if present)
+		if "outimage" in kwargs.keys():
+			outIm = kwargs["outimage"]
+		elif "outprefix" in kwargs.keys():
+			outIm = kwargs["outprefix"] + inIm
+		else:
+			outIm = "d" + inIm
+		iraf.imdelete(outIm)
+
+		# resample the data cube and view the result
+		iraf.gfcube(inIm, **kwargs)
+		self.viewCube(outIm, version="1")
+
+		return
+
 	# function to run the pipeline following the steps in K Labrie's tutorial
 	def run(self):
 
@@ -253,7 +277,7 @@ class ReduceIfuObj():
 
 			# model and subtract the scattered light
 			if self.steps["subScatLgt"]:
-				self.subtractScat("rg" + im, self.calPath + "blkMask_" + \
+				self.subScatLgt("rg" + im, self.calPath + "blkMask_" + \
 					self.flats[i], prefix = "b", fl_inter="yes", cross="yes")
 
 			# clean the cosmic rays
@@ -339,24 +363,29 @@ class ReduceIfuObj():
 				os.system("mv " + refIm + " " + self.calPath)
 
 			# subtract the sky from the object fibers
-			if self.steps["subtractSky"]:
-				logFile = self.logRoot + "_subtractSky.log"
-				self.subtractSky("txeqxbrg" + im, fl_inter="no", \
-					logfile=logFile, verbose="no")
+			if self.steps["subSky"]:
+				logFile = self.logRoot + "_subSky.log"
+				self.subSky("txeqxbrg" + im, fl_inter="no", logfile=logFile, \
+					verbose="no")
 			
-			# ...
+			# flux calibrate the spectra
 			if self.steps["calibFlux"]:
 				logFile = self.logRoot + "_calibFlux.log"
-				# TODO: set self.extin and self.sFunc b/o header
 				self.calibFlux("stxeqxbrg" + im, fl_vardq="yes", fl_ext="yes", \
 					logfile=logFile, verbose="no")
+
+			# resample the data cube
+			if self.steps["resampCube"]:
+				logFile = self.logRoot + "_resampCube.log"
+				self.resampCube("cstxeqxbrg" + im, fl_atmdisp="yes", \
+					fl_var="yes", fl_dq="yes", logfile=logFile)
 
 			continue
 
 		return
 
 	# function to subtract scattered light b/o bundle gaps identified from flats
-	def subtractScat(self, inIm, mask, **kwargs):
+	def subScatLgt(self, inIm, mask, **kwargs):
 
 		print "\nSUBTRACTING SCATTERED LIGHT FROM", inIm
 
@@ -382,7 +411,7 @@ class ReduceIfuObj():
 		return
 
 	# function to subtract the sky component from the object fibers
-	def subtractSky(self, inIm, **kwargs):
+	def subSky(self, inIm, **kwargs):
 
 		print "\nSUBTRACTING SKY FROM " + inIm
 
@@ -431,10 +460,11 @@ if __name__ == "__main__":
 	pipeSteps["cleanCosRays"] = False
 	pipeSteps["correctQE"] = False
 	pipeSteps["extractSpec"] = False
-	pipeSteps["maskSpec"] = False
+	pipeSteps["maskSpec"] = True
 	pipeSteps["rectifySpec"] = False
-	pipeSteps["subtractSky"] = False
-	pipeSteps["calibFlux"] = True
+	pipeSteps["subSky"] = False
+	pipeSteps["calibFlux"] = False
+	pipeSteps["resampCube"] = False
 
 	# setup object for VCC1895 and run pipeline 
 	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
