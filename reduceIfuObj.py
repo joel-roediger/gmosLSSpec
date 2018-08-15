@@ -11,7 +11,7 @@ from astropy.io import fits
 
 class ReduceIfuObj():
 	def __init__(self, imList, steps, rawPath="./", calPath="", mdf="", \
-		biasIm="", flatList="", arcDir="", arcList="", logRoot=""):
+		biasIm="", flatList="", arcDir="", arcList="", sFunc="", logRoot=""):
 		
 		self.steps = steps
 
@@ -25,7 +25,10 @@ class ReduceIfuObj():
 		self.arcDir = arcDir
 		self.arcList = arcList
 
-		self.flats = utils.getImPaths(flatList)
+		if len(flatList) > 0:
+			self.flats = utils.getImPaths(flatList)
+
+		self.sFunc = self.calPath + sFunc
 
 		self.logRoot = logRoot
 
@@ -86,8 +89,35 @@ class ReduceIfuObj():
 
 		return
 
+	# function to flux calibrate extracted object spectra
+	def calibFlux(self, inIm, **kwargs):
+
+		print "\nCALIBRATING FLUX IN " + inIm
+
+		# determine which extinction file to use
+		hdu = fits.open(inIm)
+		if hdu[0].header["OBSERVAT"] == "Gemini-North":
+			self.extDat = "gmos$calib/mkoextinct.dat"
+		else:
+			self.extDat = "onedstds$ctioextinct.dat"
+
+		# determine which sensitivity function to use
+		centWave = str(int(hdu[0].header["CENTWAVE"]))
+		sFunc = self.sFunc.replace("X", centWave)
+		hdu.close()
+
+		# delete previous flux calibrated spectra and generate new one
+		iraf.imdelete("c" + inIm)
+		iraf.gscalibrate(inIm, sfunction=sFunc, extinction=self.extDat, **kwargs)
+
+		# view the result
+		print "Displaying calibrated data cube"
+		self.viewCube("c" + inIm, version="1")
+
+		return
+
 	# function to clean cosmic ray hits from exposures
-	def cleanCRs(self, inIm, pref="x", **kwargs):
+	def cleanCosRays(self, inIm, pref="x", **kwargs):
 
 		print "\nCLEANING COSMIC RAYS FROM " + inIm
 
@@ -129,6 +159,81 @@ class ReduceIfuObj():
 
 		return
 
+	# function to extract spectra from the fibers and build a datacube
+	def extractSpec(self, inIm, **kwargs):
+
+		print "\nEXTRACTING SPECTRA FROM", inIm
+		
+		# destroy previous extracted spectra
+		iraf.imdelete("e" + inIm)
+
+		# extract the spectra and view the result
+		iraf.gfextract(inIm, **kwargs)
+		self.viewCube("e" + inIm, frame=1, z1=0., z2=0., extname="SCI", \
+			version="*")
+
+		return
+
+	# function to rectify IFU spectra using established wavelength calibration
+	def rectifySpec(self, inIm, **kwargs):
+
+		# remove previous rectified spectra
+		iraf.imdelete("t" + inIm)
+
+		# transform the spectra and view the result
+		iraf.gftransform(inIm, **kwargs)
+		iraf.display("t" + inIm + "[SCI]")
+
+		return
+
+	# function to perform a tailored set of reductions on an IFU exposure
+	def reduceIm(self, inIm, **kwargs):
+
+		print "\nREDUCING", inIm
+
+		# remove previously reduced exposures
+		inPref = inIm[:inIm.find(".") - 14]
+		if inPref == "":
+			outPref = "g"
+			images = outPref + inIm
+
+			outPref = "r" + outPref
+			images += "," + outPref + inIm
+		else:
+			outPref = ""
+			images = ""
+
+		if "fl_gscrrej" in kwargs.keys() and kwargs["fl_gscrrej"] == "yes":
+			outPref = "x" + outPref
+			images += "," + outPref + inIm
+		else:
+			pass
+
+		if "fl_scatsub" in kwargs.keys() and kwargs["fl_scatsub"] == "yes":
+			outPref = "b" + outPref
+			images += "," + outPref + inIm
+		else:
+			pass
+
+		if "fl_qecorr" in kwargs.keys() and kwargs["fl_qecorr"] == "yes":
+			outPref = "q" + outPref
+			images += "," + outPref + inIm
+		else:
+			pass
+
+		if "fl_extract" in kwargs.keys() and kwargs["fl_extract"] == "no":
+			pass
+		else:
+			outPref = "e" + outPref
+			images += "," + outPref + inIm
+
+		iraf.imdelete(images)
+
+		# reduce the image
+		iraf.gfreduce(inIm, **kwargs)
+
+		return
+
 	# function to run the pipeline following the steps in K Labrie's tutorial
 	def run(self):
 
@@ -154,8 +259,8 @@ class ReduceIfuObj():
 			# clean the cosmic rays
 			if self.steps["cleanCosRays"]:
 				logFile = self.logRoot + "_cleanCosRays.log"
-				self.cleanCRs("brg" + im, fl_vardq="yes", xorder=9, yorder=-1, \
-					sigclip=4.5, sigfrac=0.5, objlim=1.0, niter=4, \
+				self.cleanCosRays("brg" + im, fl_vardq="yes", xorder=9, \
+					yorder=-1, sigclip=4.5, sigfrac=0.5, objlim=1.0, niter=4, \
 					key_ron="RDNOISE", key_gain="GAIN", logfile=logFile, \
 					verbose="no")
 
@@ -237,87 +342,16 @@ class ReduceIfuObj():
 			if self.steps["subtractSky"]:
 				logFile = self.logRoot + "_subtractSky.log"
 				self.subtractSky("txeqxbrg" + im, fl_inter="no", \
-					logfile=logFile, verbose="yes")
+					logfile=logFile, verbose="no")
 			
 			# ...
-
+			if self.steps["calibFlux"]:
+				logFile = self.logRoot + "_calibFlux.log"
+				# TODO: set self.extin and self.sFunc b/o header
+				self.calibFlux("stxeqxbrg" + im, fl_vardq="yes", fl_ext="yes", \
+					logfile=logFile, verbose="no")
 
 			continue
-
-		return
-
-	# function to extract spectra from the fibers and build a datacube
-	def extractSpec(self, inIm, **kwargs):
-
-		print "\nEXTRACTING SPECTRA FROM", inIm
-		
-		# destroy previous extracted spectra
-		iraf.imdelete("e" + inIm)
-
-		# extract the spectra and view the result
-		iraf.gfextract(inIm, **kwargs)
-		self.viewCube("e" + inIm, frame=1, z1=0., z2=0., extname="SCI", \
-			version="*")
-
-		return
-
-	# function to rectify IFU spectra using established wavelength calibration
-	def rectifySpec(self, inIm, **kwargs):
-
-		# remove previous rectified spectra
-		iraf.imdelete("t" + inIm)
-
-		# transform the spectra and view the result
-		iraf.gftransform(inIm, **kwargs)
-		iraf.display("t" + inIm + "[SCI]")
-
-		return
-
-	# function to perform a tailored set of reductions on an IFU exposure
-	def reduceIm(self, inIm, **kwargs):
-
-		print "\nREDUCING", inIm
-
-		# remove previously reduced exposures
-		inPref = inIm[:inIm.find(".") - 14]
-		if inPref == "":
-			outPref = "g"
-			images = outPref + inIm
-
-			outPref = "r" + outPref
-			images += "," + outPref + inIm
-		else:
-			outPref = ""
-			images = ""
-
-		if "fl_gscrrej" in kwargs.keys() and kwargs["fl_gscrrej"] == "yes":
-			outPref = "x" + outPref
-			images += "," + outPref + inIm
-		else:
-			pass
-
-		if "fl_scatsub" in kwargs.keys() and kwargs["fl_scatsub"] == "yes":
-			outPref = "b" + outPref
-			images += "," + outPref + inIm
-		else:
-			pass
-
-		if "fl_qecorr" in kwargs.keys() and kwargs["fl_qecorr"] == "yes":
-			outPref = "q" + outPref
-			images += "," + outPref + inIm
-		else:
-			pass
-
-		if "fl_extract" in kwargs.keys() and kwargs["fl_extract"] == "no":
-			pass
-		else:
-			outPref = "e" + outPref
-			images += "," + outPref + inIm
-
-		iraf.imdelete(images)
-
-		# reduce the image
-		iraf.gfreduce(inIm, **kwargs)
 
 		return
 
@@ -400,10 +434,12 @@ if __name__ == "__main__":
 	pipeSteps["maskSpec"] = False
 	pipeSteps["rectifySpec"] = False
 	pipeSteps["subtractSky"] = False
+	pipeSteps["calibFlux"] = True
 
 	# setup object for VCC1895 and run pipeline 
 	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
 		rawPath="target/", calPath="calibrations/", mdf="gsifu_slits_mdf.fits", \
 		biasIm="v1895_masterBias.fits", flatList="flatFiles.txt", \
-		arcDir="arc/", arcList="arcFiles.txt", logRoot=logRoot)
+		arcDir="arc/", arcList="arcFiles.txt", \
+		sFunc="LTT7379_X_20080607_sFunc.fits", logRoot=logRoot)
 	v1895_sci.run()
