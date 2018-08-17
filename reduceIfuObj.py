@@ -6,7 +6,7 @@ from iraf import dataio
 from iraf import system
 from iraf import fitsutil
 from iraf import gemini, gmos
-from iraf import images, imutil
+from iraf import images, imutil, immatch
 from iraf import stsdas, analysis, gasp
 from astropy.io import fits
 
@@ -77,28 +77,22 @@ class ReduceIfuObj():
 			tmp = "tmp_" + inIm[:inIm.find(".")] + "_" + ext[-2] + ".fits"
 			tmpdq = "tmpdq_" + inIm[:inIm.find(".")] + "_" + ext[-2] + ".fits"
 
-			images = tmp + "," + tmpdq + ",scratch.fits"
+			images = tmp + "," + tmpdq
 			iraf.imdelete(images)
 
 			if ext[-2] == "1": iraf.copy(inIm, "x" + inIm)
 			iraf.imcopy(inIm + ext, tmp)
 			iraf.fixpix(tmp, plMask, linterp="1,2,3,4")
-			#iraf.copy("tmp_" + inIm, "x" + inIm)
-			#iraf.imcopy(tmp + "[0]", "x" + inIm + "[SCI," + ext[-2] + \
-			#	",overwrite]")
 			iraf.imcopy(tmp + "[*,*]", "x" + inIm + ext + "[*,*]")
 
 			iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], tmpdq)
-			#iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], "scratch")
-			#iraf.rfits("scratch.fits", "", tmpdq, datatype="s")
-			#iraf.imcopy(tmpdq + "[0]", "x" + inIm + "[DQ," + ext[-2] + \
-			#	",overwrite]")
 			iraf.imcopy(tmpdq + "[*,*]", "x" + inIm + "[DQ," + ext[-2:] + \
 				"[*,*]")
 
 			# display result
 			iraf.display("x" + inIm + ext)
 
+		# delete temporary files
 		iraf.imdelete(images)
 		
 		return
@@ -263,9 +257,16 @@ class ReduceIfuObj():
 			outIm = "d" + inIm
 		iraf.imdelete(outIm)
 
-		# resample the data cube and view the result
+		# resample the data cube
 		iraf.gfcube(inIm, **kwargs)
-		self.viewCube(outIm, version="1")
+
+		# make white light image and display it
+		whiteIm = outIm[:outIm.find(".")] + "_2d.fits"
+		iraf.imdelete(whiteIm)
+		iraf.imcombine(outIm + "[SCI]", whiteIm, project="yes", combine="sum", \
+			logfile=kwargs["logfile"])
+		print "\nDisplaying white-light image"
+		iraf.display(whiteIm)
 
 		return
 
@@ -473,11 +474,11 @@ if __name__ == "__main__":
 	pipeSteps["cleanCosRays"] = False
 	pipeSteps["correctQE"] = False
 	pipeSteps["extractSpec"] = False
-	pipeSteps["maskSpec"] = True
-	pipeSteps["rectifySpec"] = True
+	pipeSteps["maskSpec"] = False
+	pipeSteps["rectifySpec"] = False
 	pipeSteps["subSky"] = False
 	pipeSteps["calibFlux"] = False
-	pipeSteps["resampCube"] = False
+	pipeSteps["resampCube"] = True
 
 	# setup object for VCC1895 and run pipeline 
 	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
