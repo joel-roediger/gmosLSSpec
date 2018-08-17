@@ -2,10 +2,11 @@ import os
 import utils
 from pyraf import iraf
 from iraf import proto
+from iraf import dataio
 from iraf import system
 from iraf import fitsutil
 from iraf import gemini, gmos
-from iraf import images, imutil
+from iraf import images, imutil, immatch
 from iraf import stsdas, analysis, gasp
 from astropy.io import fits
 
@@ -37,14 +38,10 @@ class ReduceIfuObj():
 	# function to mask cosmetics in exposures
 	def adjustDQ(self, inIm, ext, txtMask):
 
-		# allow user to dynamically declare the extension
-		#ext = str(raw_input("\nWhich extension needs masking? (EXTNAME,EXTVER): "))
-		#ext = "[" + ext + "]"
-
 		print "\nADJUSTING MASK FOR " + inIm + ext.upper()
 		
 		# grab dimensions of mask from header of image
-		# TODO: does expression for num need to be generalized to one-slit case?
+		# TODO: will expression for num work in one-slit case?
 		hdu = fits.open(inIm)
 		num = 3 * (int(ext[-2]) - 1) + 2
 		xDim = hdu[num].header["NAXIS1"]
@@ -52,7 +49,11 @@ class ReduceIfuObj():
 		hdu.close()
 
 		# display input image
+		print "Displaying spectra"
 		iraf.display(inIm + ext)
+
+		if ext[-2] == "1":
+			iraf.imdelete("x" + inIm, verify="yes")
 
 		# allow user to adjust mask iteratively
 		while True:
@@ -63,7 +64,6 @@ class ReduceIfuObj():
 				os.system("rm -iv " + txtMask)
 				ranges = raw_input("Coord ranges to be masked (space-separated): ")
 				cmd = "echo '" + ranges + "' >> " + txtMask
-				#print cmd
 				os.system(cmd)
 			else:
 				break
@@ -74,19 +74,27 @@ class ReduceIfuObj():
 			iraf.text2mask(txtMask, plMask, xDim, yDim)
 
 			# interpolate over bad pixels and mark them in DQ plane
-			images = "tmp_" + inIm + "," + "x" + inIm + "," + "tmpdq_" + inIm
+			tmp = "tmp_" + inIm[:inIm.find(".")] + "_" + ext[-2] + ".fits"
+			tmpdq = "tmpdq_" + inIm[:inIm.find(".")] + "_" + ext[-2] + ".fits"
+
+			images = tmp + "," + tmpdq
 			iraf.imdelete(images)
-			iraf.copy(inIm, "tmp_" + inIm)
-			iraf.fixpix("tmp_" + inIm + ext, plMask, linterp="1,2,3,4")
-			iraf.copy("tmp_" + inIm, "x" + inIm)
-			iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], \
-				"tmpdq_" + inIm)
-			iraf.imcopy("tmpdq_" + inIm + "[0]", "x" + inIm + "[DQ," + \
-				ext[-2:-1] + ",overwrite]")
+
+			if ext[-2] == "1": iraf.copy(inIm, "x" + inIm)
+			iraf.imcopy(inIm + ext, tmp)
+			iraf.fixpix(tmp, plMask, linterp="1,2,3,4")
+			iraf.imcopy(tmp + "[*,*]", "x" + inIm + ext + "[*,*]")
+
+			iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], tmpdq)
+			iraf.imcopy(tmpdq + "[*,*]", "x" + inIm + "[DQ," + ext[-2:] + \
+				"[*,*]")
 
 			# display result
 			iraf.display("x" + inIm + ext)
 
+		# delete temporary files
+		iraf.imdelete(images)
+		
 		return
 
 	# function to flux calibrate extracted object spectra
@@ -182,6 +190,7 @@ class ReduceIfuObj():
 
 		# transform the spectra and view the result
 		iraf.gftransform(inIm, **kwargs)
+		print "\nDisplaying spectra"
 		iraf.display("t" + inIm + "[SCI]")
 
 		return
@@ -234,6 +243,33 @@ class ReduceIfuObj():
 
 		return
 
+	# function to resample a data cube onto a regular 3D grid
+	def resampCube(self, inIm, **kwargs):
+
+		print "\nRESAMPLING DATA CUBE IN " + inIm
+
+		# determine name of output and delete previous version (if present)
+		if "outimage" in kwargs.keys():
+			outIm = kwargs["outimage"]
+		elif "outprefix" in kwargs.keys():
+			outIm = kwargs["outprefix"] + inIm
+		else:
+			outIm = "d" + inIm
+		iraf.imdelete(outIm)
+
+		# resample the data cube
+		iraf.gfcube(inIm, **kwargs)
+
+		# make white light image and display it
+		whiteIm = outIm[:outIm.find(".")] + "_2d.fits"
+		iraf.imdelete(whiteIm)
+		iraf.imcombine(outIm + "[SCI]", whiteIm, project="yes", combine="sum", \
+			logfile=kwargs["logfile"])
+		print "\nDisplaying white-light image"
+		iraf.display(whiteIm)
+
+		return
+
 	# function to run the pipeline following the steps in K Labrie's tutorial
 	def run(self):
 
@@ -253,7 +289,7 @@ class ReduceIfuObj():
 
 			# model and subtract the scattered light
 			if self.steps["subScatLgt"]:
-				self.subtractScat("rg" + im, self.calPath + "blkMask_" + \
+				self.subScatLgt("rg" + im, self.calPath + "blkMask_" + \
 					self.flats[i], prefix = "b", fl_inter="yes", cross="yes")
 
 			# clean the cosmic rays
@@ -331,7 +367,7 @@ class ReduceIfuObj():
 					self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
 						fl_vardq="no", dw="INDEF", logfile=logFile, verbose="no")
 
-				dw = input("Desired wavelength sampling: ")
+				dw = input("\nDesired wavelength sampling: ")
 				self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
 					fl_vardq="yes", dw=dw, logfile=logFile, verbose="no")
 
@@ -339,24 +375,29 @@ class ReduceIfuObj():
 				os.system("mv " + refIm + " " + self.calPath)
 
 			# subtract the sky from the object fibers
-			if self.steps["subtractSky"]:
-				logFile = self.logRoot + "_subtractSky.log"
-				self.subtractSky("txeqxbrg" + im, fl_inter="no", \
-					logfile=logFile, verbose="no")
+			if self.steps["subSky"]:
+				logFile = self.logRoot + "_subSky.log"
+				self.subSky("txeqxbrg" + im, fl_inter="no", logfile=logFile, \
+					verbose="no")
 			
-			# ...
+			# flux calibrate the spectra
 			if self.steps["calibFlux"]:
 				logFile = self.logRoot + "_calibFlux.log"
-				# TODO: set self.extin and self.sFunc b/o header
 				self.calibFlux("stxeqxbrg" + im, fl_vardq="yes", fl_ext="yes", \
 					logfile=logFile, verbose="no")
+
+			# resample the data cube
+			if self.steps["resampCube"]:
+				logFile = self.logRoot + "_resampCube.log"
+				self.resampCube("cstxeqxbrg" + im, fl_atmdisp="yes", \
+					fl_var="yes", fl_dq="yes", logfile=logFile)
 
 			continue
 
 		return
 
 	# function to subtract scattered light b/o bundle gaps identified from flats
-	def subtractScat(self, inIm, mask, **kwargs):
+	def subScatLgt(self, inIm, mask, **kwargs):
 
 		print "\nSUBTRACTING SCATTERED LIGHT FROM", inIm
 
@@ -382,7 +423,7 @@ class ReduceIfuObj():
 		return
 
 	# function to subtract the sky component from the object fibers
-	def subtractSky(self, inIm, **kwargs):
+	def subSky(self, inIm, **kwargs):
 
 		print "\nSUBTRACTING SKY FROM " + inIm
 
@@ -391,7 +432,9 @@ class ReduceIfuObj():
 
 		# subtract the sky and view the result (as image and datacube)
 		iraf.gfskysub(inIm, **kwargs)
+		print "\nDisplaying spectra"
 		iraf.display("s" + inIm + "[SCI]")
+		print "\nDisplaying data cube"
 		self.viewCube("s" + inIm, extname="SCI", version="1")
 
 		return
@@ -433,8 +476,9 @@ if __name__ == "__main__":
 	pipeSteps["extractSpec"] = False
 	pipeSteps["maskSpec"] = False
 	pipeSteps["rectifySpec"] = False
-	pipeSteps["subtractSky"] = False
-	pipeSteps["calibFlux"] = True
+	pipeSteps["subSky"] = False
+	pipeSteps["calibFlux"] = False
+	pipeSteps["resampCube"] = True
 
 	# setup object for VCC1895 and run pipeline 
 	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
