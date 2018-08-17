@@ -2,6 +2,7 @@ import os
 import utils
 from pyraf import iraf
 from iraf import proto
+from iraf import dataio
 from iraf import system
 from iraf import fitsutil
 from iraf import gemini, gmos
@@ -37,10 +38,6 @@ class ReduceIfuObj():
 	# function to mask cosmetics in exposures
 	def adjustDQ(self, inIm, ext, txtMask):
 
-		# allow user to dynamically declare the extension
-		#ext = str(raw_input("\nWhich extension needs masking? (EXTNAME,EXTVER): "))
-		#ext = "[" + ext + "]"
-
 		print "\nADJUSTING MASK FOR " + inIm + ext.upper()
 		
 		# grab dimensions of mask from header of image
@@ -52,7 +49,11 @@ class ReduceIfuObj():
 		hdu.close()
 
 		# display input image
+		print "Displaying spectra"
 		iraf.display(inIm + ext)
+
+		if ext[-2] == "1":
+			iraf.imdelete("x" + inIm, verify="yes")
 
 		# allow user to adjust mask iteratively
 		while True:
@@ -73,24 +74,33 @@ class ReduceIfuObj():
 			iraf.text2mask(txtMask, plMask, xDim, yDim)
 
 			# interpolate over bad pixels and mark them in DQ plane
-			images = "tmp_" + inIm + "," + "x" + inIm + "," + "tmpdq_" + inIm
+			tmp = "tmp_" + inIm[:inIm.find(".")] + "_" + ext[-2] + ".fits"
+			tmpdq = "tmpdq_" + inIm[:inIm.find(".")] + "_" + ext[-2] + ".fits"
+
+			images = tmp + "," + tmpdq + ",scratch.fits"
 			iraf.imdelete(images)
-			iraf.copy(inIm, "tmp_" + inIm)
-			iraf.fixpix("tmp_" + inIm + ext, plMask, linterp="1,2,3,4")
-			iraf.copy("tmp_" + inIm, "x" + inIm)
-			# TODO: prevent overwrite of OBJECT card for DQ plane
-			iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], \
-				"tmpdq_" + inIm)
-			print plMask, "+", "x" + inIm + "[DQ," + ext[-2:], \
-				"tmpdq_" + inIm
-			iraf.imcopy("tmpdq_" + inIm + "[0]", "x" + inIm + "[DQ," + \
-				ext[-2:-1] + ",overwrite]")
-			print "tmpdq_" + inIm + "[0]", "x" + inIm + "[DQ," + \
-				ext[-2:-1] + ",overwrite]"
+
+			if ext[-2] == "1": iraf.copy(inIm, "x" + inIm)
+			iraf.imcopy(inIm + ext, tmp)
+			iraf.fixpix(tmp, plMask, linterp="1,2,3,4")
+			#iraf.copy("tmp_" + inIm, "x" + inIm)
+			#iraf.imcopy(tmp + "[0]", "x" + inIm + "[SCI," + ext[-2] + \
+			#	",overwrite]")
+			iraf.imcopy(tmp + "[*,*]", "x" + inIm + ext + "[*,*]")
+
+			iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], tmpdq)
+			#iraf.imarith(plMask, "+", "x" + inIm + "[DQ," + ext[-2:], "scratch")
+			#iraf.rfits("scratch.fits", "", tmpdq, datatype="s")
+			#iraf.imcopy(tmpdq + "[0]", "x" + inIm + "[DQ," + ext[-2] + \
+			#	",overwrite]")
+			iraf.imcopy(tmpdq + "[*,*]", "x" + inIm + "[DQ," + ext[-2:] + \
+				"[*,*]")
 
 			# display result
 			iraf.display("x" + inIm + ext)
 
+		iraf.imdelete(images)
+		
 		return
 
 	# function to flux calibrate extracted object spectra
@@ -186,6 +196,7 @@ class ReduceIfuObj():
 
 		# transform the spectra and view the result
 		iraf.gftransform(inIm, **kwargs)
+		print "\nDisplaying spectra"
 		iraf.display("t" + inIm + "[SCI]")
 
 		return
@@ -355,7 +366,7 @@ class ReduceIfuObj():
 					self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
 						fl_vardq="no", dw="INDEF", logfile=logFile, verbose="no")
 
-				dw = input("Desired wavelength sampling: ")
+				dw = input("\nDesired wavelength sampling: ")
 				self.rectifySpec("xeqxbrg" + im, wavtraname=refIm, \
 					fl_vardq="yes", dw=dw, logfile=logFile, verbose="no")
 
@@ -420,7 +431,9 @@ class ReduceIfuObj():
 
 		# subtract the sky and view the result (as image and datacube)
 		iraf.gfskysub(inIm, **kwargs)
+		print "\nDisplaying spectra"
 		iraf.display("s" + inIm + "[SCI]")
+		print "\nDisplaying data cube"
 		self.viewCube("s" + inIm, extname="SCI", version="1")
 
 		return
@@ -461,7 +474,7 @@ if __name__ == "__main__":
 	pipeSteps["correctQE"] = False
 	pipeSteps["extractSpec"] = False
 	pipeSteps["maskSpec"] = True
-	pipeSteps["rectifySpec"] = False
+	pipeSteps["rectifySpec"] = True
 	pipeSteps["subSky"] = False
 	pipeSteps["calibFlux"] = False
 	pipeSteps["resampCube"] = False
