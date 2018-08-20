@@ -13,9 +13,12 @@ from iraf import stsdas, analysis, gasp
 from astropy.io import fits
 
 class ReduceIfuObj():
-	def __init__(self, imList, steps, rawPath="./", calPath="", mdf="", \
-		biasIm="", flatList="", arcDir="", arcList="", sFunc="", logRoot=""):
+	def __init__(self, imList, target="", steps={}, rawPath="./", calPath="", \
+		mdf="", biasIm="", flatList="", arcDir="", arcList="", sFunc="", \
+		logRoot=""):
 		
+		self.target = target
+
 		self.steps = steps
 
 		self.rawPath = rawPath
@@ -51,7 +54,7 @@ class ReduceIfuObj():
 		hdu.close()
 
 		# display input image
-		print "Displaying spectra"
+		print "Displaying 2D spectra"
 		iraf.display(inIm + ext)
 
 		if ext[-2] == "1":
@@ -136,49 +139,6 @@ class ReduceIfuObj():
 
 		return
 
-	# function to stack several data cubes into single one
-	def combCubes(self, cubeList, **kwargs):
-
-		# extract filenames of individual data cubes
-		cubePaths = utils.getImPaths(cubeList)
-
-		cubes = ", ".join(cubePaths)
-		print "\nCOMBINING DATA CUBES: " + cubes
-
-		# make work directory and copy images there
-		cmd = "mkdir -v scratch/"
-		os.system(cmd)
-
-		for i, cube in enumerate(cubePaths):
-			cmd = "cp -v " + cube + " scratch/"
-			os.system(cmd)
-
-			cubePaths[i] = "scratch/" + cube
-
-		# update the WCS header cards of the cubes to their centroids
-		# TODO: allow for lower pixel limit?
-		# TODO: put calls to pyfalign and pyfmosaic into iterative loop?
-		pyfu.pyfalign(cubePaths, method="centroid", llimit=0)
-
-		# resample and align the cubes without stacking them
-		# TODO: add line below to view alignment
-		iraf.imdelete("scratch/separatedCubes.fits")
-		pyfu.pyfmosaic(cubePaths, "scratch/separatedCubes.fits", separate="yes")
-
-		# stack the aligned cubes and view the result
-		iraf.imdelete("finalCube.fits")
-		pyfu.pyfmosaic(cubePaths, "finalCube.fits", propvar="yes")
-		# TODO: include display of white-light image
-		self.viewCubeMov("finalCube.fits")
-
-		# remove work directory and its contents
-		cmd = "rm scratch/*.fits"
-		os.system(cmd)
-		cmd = "rmdir scratch/"
-		os.system(cmd)
-
-		return
-
 	# function to compute sensitivity function b/o observed flux standard
 	def compSensFunc(self, inIm, **kwargs):
 
@@ -235,7 +195,7 @@ class ReduceIfuObj():
 
 		# transform the spectra and view the result
 		iraf.gftransform(inIm, **kwargs)
-		print "\nDisplaying spectra"
+		print "\nDisplaying 2D spectra"
 		iraf.display("t" + inIm + "[SCI]")
 
 		return
@@ -305,13 +265,8 @@ class ReduceIfuObj():
 		# resample the data cube
 		iraf.gfcube(inIm, **kwargs)
 
-		# collapse cube and display it
-		whiteIm = outIm[:outIm.find(".")] + "_2d.fits"
-		iraf.imdelete(whiteIm)
-		iraf.imcombine(outIm + "[SCI]", whiteIm, project="yes", combine="sum", \
-			logfile=kwargs["logfile"])
-		print "\nDisplaying white-light image"
-		iraf.display(whiteIm)
+		# view white-light image
+		self.viewWhiteIm(outIm, **kwargs)
 
 		# view cube as movie in wavelength
 		self.viewCubeMov(outIm)
@@ -443,8 +398,8 @@ class ReduceIfuObj():
 			continue
 
 		# stack data cubes
-		if self.steps["combCubes"]:
-			logFile = self.logRoot + "_combCubes.log"
+		if self.steps["stackCubes"]:
+			logFile = self.logRoot + "_stackCubes.log"
 
 			# make list of data cubes
 			cubeList = "cubeFiles.txt"
@@ -452,11 +407,58 @@ class ReduceIfuObj():
 			os.system(cmd)
 
 			# combine data cubes
-			self.combCubes(cubeList)
+			self.stackCubes(cubeList)
 
 			# remove list
 			cmd = "rm -v " + cubeList
 			os.system(cmd)
+
+		return
+
+	# function to stack several data cubes into single one
+	def stackCubes(self, cubeList, **kwargs):
+
+		outCube = self.target + "_finalCube.fits"
+
+		# extract filenames of individual data cubes
+		cubePaths = utils.getImPaths(cubeList)
+
+		cubes = ", ".join(cubePaths)
+		print "\nCOMBINING DATA CUBES: " + cubes
+
+		# make work directory and copy images there
+		cmd = "mkdir -v scratch/"
+		os.system(cmd)
+
+		for i, cube in enumerate(cubePaths):
+			cmd = "cp -v " + cube + " scratch/"
+			os.system(cmd)
+
+			cubePaths[i] = "scratch/" + cube
+
+		# update the WCS header cards of the cubes to their centroids
+		# TODO: allow for lower pixel limit?
+		# TODO: put calls to pyfalign and pyfmosaic into iterative loop?
+		pyfu.pyfalign(cubePaths, method="centroid", llimit=0)
+
+		# resample and align the cubes without stacking them
+		# TODO: add line below to view alignment
+		iraf.imdelete("scratch/separatedCubes.fits")
+		pyfu.pyfmosaic(cubePaths, "scratch/separatedCubes.fits", separate="yes")
+
+		# stack the aligned cubes and view the result
+		# (both as white-light image and slow-paced movie)
+		iraf.imdelete(outCube)
+		pyfu.pyfmosaic(cubePaths, outCube, propvar="yes")
+		self.viewWhiteIm(outCube)
+		time.sleep(30)
+		self.viewCubeMov(outCube)
+
+		# remove work directory and its contents
+		cmd = "rm scratch/*.fits"
+		os.system(cmd)
+		cmd = "rmdir scratch/"
+		os.system(cmd)
 
 		return
 
@@ -496,8 +498,9 @@ class ReduceIfuObj():
 
 		# subtract the sky and view the result (as image and datacube)
 		iraf.gfskysub(inIm, **kwargs)
-		print "\nDisplaying spectra"
+		print "\nDisplaying 2D spectra"
 		iraf.display("s" + inIm + "[SCI]")
+		print "\nDisplaying data cube"
 		self.viewCube("s" + inIm, extname="SCI", version="1")
 
 		return
@@ -526,7 +529,7 @@ class ReduceIfuObj():
 
 		return
 
-	# function to step coarsely through a cube along the wavelength axis
+	# function to step through a cube along the wavelength axis
 	def viewCubeMov(self, inCube, step=10, **kwargs):
 
 		print "\nSTEPPING THROUGH " + inCube
@@ -546,7 +549,8 @@ class ReduceIfuObj():
 				lastFrame = str(i + 9)
 
 			iraf.imcombine(inCube + "[SCI][*,*," + str(i) + ":" + lastFrame + \
-				"]", cubeChunk, project="yes", combine="sum")
+				"]", cubeChunk, project="yes", combine="sum", logfile="")
+			print "Displaying chunk [" + str(i) + ":" + lastFrame + "]"
 			iraf.display(cubeChunk, frame="1", contrast=0.)
 			time.sleep(2)
 
@@ -556,11 +560,29 @@ class ReduceIfuObj():
 
 		return
 
+	# function to make and display a white-light image from the cube
+	def viewWhiteIm(self, inIm, **kwargs):
+
+		print "\nDISPLAYING WHITE-LIGHT IMAGE"
+
+		idx = inIm.find(".")
+		#whiteIm = inIm[:idx] + "_2d.fits"
+		whiteIm = "whiteIm_" + inIm
+
+		iraf.imdelete(whiteIm)
+		iraf.imcombine(inIm + "[SCI]", whiteIm, project="yes", combine="sum", \
+			logfile="")
+		
+		iraf.display(whiteIm)
+
+		return
+
 
 if __name__ == "__main__":
 
 	# set root filename of logs
-	logRoot = "v1895_sci"
+	target = "v1895"
+	logRoot = target + "_sci"
 
 	# declare which steps of pipeline to execute
 	pipeSteps = {}
@@ -574,12 +596,13 @@ if __name__ == "__main__":
 	pipeSteps["subSky"] = False
 	pipeSteps["calibFlux"] = False
 	pipeSteps["resampCube"] = False
-	pipeSteps["combCubes"] = True
+	pipeSteps["stackCubes"] = True
 
 	# setup object for VCC1895 and run pipeline 
-	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
+	v1895_sci = ReduceIfuObj("targetFiles.txt", target=target, steps=pipeSteps, \
 		rawPath="target/", calPath="calibrations/", mdf="gsifu_slits_mdf.fits", \
-		biasIm="v1895_masterBias.fits", flatList="flatFiles.txt", \
+		biasIm=target + "_masterBias.fits", flatList="flatFiles.txt", \
 		arcDir="arc/", arcList="arcFiles.txt", \
 		sFunc="LTT7379_X_20080607_sFunc.fits", logRoot=logRoot)
 	v1895_sci.run()
+
