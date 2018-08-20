@@ -1,4 +1,5 @@
 import os
+import time
 import utils
 from pyraf import iraf
 from iraf import proto
@@ -392,6 +393,8 @@ class ReduceIfuObj():
 				self.resampCube("cstxeqxbrg" + im, fl_atmdisp="yes", \
 					fl_var="yes", fl_dq="yes", logfile=logFile)
 
+			self.viewCubeMov("dcstxeqxbrg" + im)
+
 			continue
 
 		return
@@ -434,7 +437,6 @@ class ReduceIfuObj():
 		iraf.gfskysub(inIm, **kwargs)
 		print "\nDisplaying spectra"
 		iraf.display("s" + inIm + "[SCI]")
-		print "\nDisplaying data cube"
 		self.viewCube("s" + inIm, extname="SCI", version="1")
 
 		return
@@ -454,10 +456,42 @@ class ReduceIfuObj():
 
 		return
 
-	# function to view an extracted datacube and its individual spectra
-	def viewCube(self, cubeFile, **kwargs):
+	# function to view a cube and its individual spectra
+	def viewCube(self, cube, **kwargs):
 
-		iraf.gfdisplay(cubeFile, **kwargs)
+		print "\nDISPLAYING DATA CUBE"
+
+		iraf.gfdisplay(cube, **kwargs)
+
+		return
+
+	# function to step coarsely through a cube along the wavelength axis
+	def viewCubeMov(self, inCube, step=10, **kwargs):
+
+		print "\nSTEPPING THROUGH " + inCube
+
+		# obtain number of wavelength samples in cube
+		hdul = fits.open(inCube)
+		nWave = hdul["SCI"].data.shape[0]
+
+		# step through cube, summing images within each chunk
+		cubeChunk = "chunk.fits"
+		for i in range(0, nWave, step):
+			iraf.imdelete(cubeChunk)
+
+			if i + 9 > nWave - 1:
+				lastFrame = str(nWave - 1)
+			else:
+				lastFrame = str(i + 9)
+
+			iraf.imcombine(inCube + "[SCI][*,*," + str(i) + ":" + lastFrame + \
+				"]", cubeChunk, project="yes", combine="sum")
+			iraf.display(cubeChunk, frame="1", contrast=0.)
+			time.sleep(2)
+
+		# delete the last wavelength chunk and close the cube
+		iraf.imdelete(cubeChunk)
+		hdul.close()
 
 		return
 
@@ -478,7 +512,7 @@ if __name__ == "__main__":
 	pipeSteps["rectifySpec"] = False
 	pipeSteps["subSky"] = False
 	pipeSteps["calibFlux"] = False
-	pipeSteps["resampCube"] = True
+	pipeSteps["resampCube"] = False
 
 	# setup object for VCC1895 and run pipeline 
 	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
