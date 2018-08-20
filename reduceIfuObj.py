@@ -1,4 +1,5 @@
 import os
+import pyfu
 import time
 import utils
 from pyraf import iraf
@@ -135,6 +136,49 @@ class ReduceIfuObj():
 
 		return
 
+	# function to stack several data cubes into single one
+	def combCubes(self, cubeList, **kwargs):
+
+		# extract filenames of individual data cubes
+		cubePaths = utils.getImPaths(cubeList)
+
+		cubes = ", ".join(cubePaths)
+		print "\nCOMBINING DATA CUBES: " + cubes
+
+		# make work directory and copy images there
+		cmd = "mkdir -v scratch/"
+		os.system(cmd)
+
+		for i, cube in enumerate(cubePaths):
+			cmd = "cp -v " + cube + " scratch/"
+			os.system(cmd)
+
+			cubePaths[i] = "scratch/" + cube
+
+		# update the WCS header cards of the cubes to their centroids
+		# TODO: allow for lower pixel limit?
+		# TODO: put calls to pyfalign and pyfmosaic into iterative loop?
+		pyfu.pyfalign(cubePaths, method="centroid", llimit=0)
+
+		# resample and align the cubes without stacking them
+		# TODO: add line below to view alignment
+		iraf.imdelete("scratch/separatedCubes.fits")
+		pyfu.pyfmosaic(cubePaths, "scratch/separatedCubes.fits", separate="yes")
+
+		# stack the aligned cubes and view the result
+		iraf.imdelete("finalCube.fits")
+		pyfu.pyfmosaic(cubePaths, "finalCube.fits", propvar="yes")
+		# TODO: include display of white-light image
+		self.viewCubeMov("finalCube.fits")
+
+		# remove work directory and its contents
+		cmd = "rm scratch/*.fits"
+		os.system(cmd)
+		cmd = "rmdir scratch/"
+		os.system(cmd)
+
+		return
+
 	# function to compute sensitivity function b/o observed flux standard
 	def compSensFunc(self, inIm, **kwargs):
 
@@ -261,13 +305,16 @@ class ReduceIfuObj():
 		# resample the data cube
 		iraf.gfcube(inIm, **kwargs)
 
-		# make white light image and display it
+		# collapse cube and display it
 		whiteIm = outIm[:outIm.find(".")] + "_2d.fits"
 		iraf.imdelete(whiteIm)
 		iraf.imcombine(outIm + "[SCI]", whiteIm, project="yes", combine="sum", \
 			logfile=kwargs["logfile"])
 		print "\nDisplaying white-light image"
 		iraf.display(whiteIm)
+
+		# view cube as movie in wavelength
+		self.viewCubeMov(outIm)
 
 		return
 
@@ -392,10 +439,24 @@ class ReduceIfuObj():
 				logFile = self.logRoot + "_resampCube.log"
 				self.resampCube("cstxeqxbrg" + im, fl_atmdisp="yes", \
 					fl_var="yes", fl_dq="yes", logfile=logFile)
-
-			self.viewCubeMov("dcstxeqxbrg" + im)
-
+			
 			continue
+
+		# stack data cubes
+		if self.steps["combCubes"]:
+			logFile = self.logRoot + "_combCubes.log"
+
+			# make list of data cubes
+			cubeList = "cubeFiles.txt"
+			cmd = "ls dcstxeqxbrg* > " + cubeList
+			os.system(cmd)
+
+			# combine data cubes
+			self.combCubes(cubeList)
+
+			# remove list
+			cmd = "rm -v " + cubeList
+			os.system(cmd)
 
 		return
 
@@ -446,7 +507,7 @@ class ReduceIfuObj():
 
 		print "\nSUMMING FIBERS FROM " + inIm
 
-		# delete ...
+		# delete previous summed spectra
 		# TODO: add attribute to class to turn imdelete verifications on/off
 		iraf.imdelete("a" + inIm)
 
@@ -513,6 +574,7 @@ if __name__ == "__main__":
 	pipeSteps["subSky"] = False
 	pipeSteps["calibFlux"] = False
 	pipeSteps["resampCube"] = False
+	pipeSteps["combCubes"] = True
 
 	# setup object for VCC1895 and run pipeline 
 	v1895_sci = ReduceIfuObj("targetFiles.txt", steps=pipeSteps, \
