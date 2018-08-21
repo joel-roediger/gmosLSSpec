@@ -8,13 +8,27 @@ from iraf import gemini, gmos
 from iraf import images, imutil
 
 class ReduceIfuCals():
+
 	# TODO: add attr to turn verify on/off for file deletions
-	def __init__(self, biasList="", flatList=""):
-		
-		#self.logFile = logFile
+	def __init__(self, target="", steps={}, rawMdf="", mdf="", mdfPath="./", \
+		biasList="", biasPath="bias/", flatList="", flatPath="flat/", \
+		logRoot=""):
+
+		self.target = target
+		self.logRoot = logRoot
+
+		self.steps = steps
+
+		self.rawMdf = rawMdf
+		self.mdf = mdf
+		self.mdfPath = mdfPath
 
 		self.biasList = biasList
+		self.biasPath = biasPath
+		self.masterB = self.logRoot + "_masterBias.fits"
+
 		self.flatList = flatList
+		self.flatPath = flatPath
 
 		return
 
@@ -28,15 +42,15 @@ class ReduceIfuCals():
 		return
 
 	# function to check the viability of the raw MDF by extracting flat spectra
-	def checkMDF(self, rawMDF, flatList, **kwargs):
+	def checkMdf(self, rawMdf, flatList, **kwargs):
 		
 		# copy raw MDF to local directory
-		mdf = rawMDF
-		if not os.path.exists(mdf):
+		#mdf = rawMdf
+		if not os.path.exists(self.mdf):
 			print "\nFETCHING RAW MDF"
-			mdfPath = "/Users/roedigerj/anaconda/envs/astroconda/iraf_extern/gemini/gmos/data/"
-			rawMDF = mdfPath + rawMDF
-			shutil.copy(rawMDF, "./")
+			rawPath = "/Users/roedigerj/anaconda/envs/astroconda/iraf_extern/gemini/gmos/data/"
+			rawMdf = rawPath + rawMdf
+			shutil.copy(rawMdf, self.mdfPath + self.mdf)
 		
 		# TODO: check that flatList is not empty
 
@@ -51,8 +65,8 @@ class ReduceIfuCals():
 			# do basic reduction of selected exposure
 			_ = self.reduceIm(im, fl_inter="no", fl_gscrrej="no", \
 				fl_extract="no", fl_wavtran="no", fl_skysub="no", \
-				fl_fluxcal="no", mdffile=mdf, mdfdir="./", verbose="no", \
-				**kwargs)
+				fl_fluxcal="no", mdffile=self.mdf, mdfdir=self.mdfPath, \
+				verbose="no", **kwargs)
 
 			# extract spectrum to check match between MDF and IFU flat
 			logFile = ""
@@ -65,11 +79,12 @@ class ReduceIfuCals():
 			# TODO: remove any extracted files
 
 			# call tcalc to fix MDF (if necessary)
-			fixMDF = bool(input("\nDoes MDF need fixing? (True/False): "))
-			if fixMDF:
+			fixMdf = bool(input("\nDoes MDF need fixing? (True/False): "))
+			if fixMdf:
 				fiber = input("Fiber to fix: ")
 				flag = input("Flag value: ")
-				iraf.tcalc(mdf, "BEAM", "if NO == " + str(fiber) + "then " + str(flag) + " else BEAM")
+				iraf.tcalc(self.mdf, "BEAM", "if NO == " + str(fiber) + \
+					"then " + str(flag) + " else BEAM")
 			else:
 				break
 		
@@ -102,22 +117,23 @@ class ReduceIfuCals():
 
 		return
 
-	# function to produce a high-SNR master from a list of GMOS bias images
+	# function to produce a high-SNR master bias from a list of GMOS images
 	def reduceBias(self, imList, outIm, **kwargs):
 
 		print "\nREDUCING BIASES"
 		
-		# append prefix to file list
+		# set up input redirection
 		imList = "@" + imList
 
-		# remove previous master bias
-		iraf.imdelete(outIm)
+		# remove previous master
+		iraf.imdelete(outIm, verify="yes")
 
+		# reduce bias exposures and view master
 		iraf.gbias(imList, outIm, **kwargs)
+		util.viewIm(outIm)
 
 		# remove prepared images
-		junk = "g" + imList
-		iraf.imdelete(junk)
+		iraf.imdelete("g" + imList)
 
 		return
 
@@ -241,90 +257,114 @@ class ReduceIfuCals():
 
 		return outPref
 
+	# function to run the pipeline following the steps in K Labrie's tutorial
 	def run(self):
 
 		# view bias exposures
-		#utils.viewIms(self.biasList, sat="yes")	
+		if self.steps["viewBias"]:
+			utils.viewIms(self.biasList, sat="yes")	
 
 		# produce master bias
-		logFile = "v1895_reduceBias.log"
-		masterBias = "v1895_masterBias.fits"
-		#self.reduceBias(self.biasList, masterBias, rawpath="bias/", \
-		#	fl_inter="no", fl_vardq="yes", logfile=logFile, verbose="no")
-		#util.viewIm(masterBias)
-
+		if self.steps["reduceBias"]:
+			logFile = self.logRoot + "_reduceBias.log"
+			self.reduceBias(self.biasList, self.masterB, rawpath=self.biasPath, \
+				fl_inter="no", fl_vardq="yes", logfile=logFile, verbose="no")
 
 		# view flat exposures
-		#utils.viewIms(self.flatList, sat="yes")
+		if self.steps["viewFlat"]:
+			utils.viewIms(self.flatList, sat="yes")
 
 		# check MDF (and modify, if necessary)
-		rawMDF = "gsifu_slits_mdf.fits"
-		logFile = "v1895_checkMDF.log"
-		#self.checkMDF(rawMDF, self.flatList, slits="both", rawpath="flat/", \
-		#	bias=masterBias, logfile=logFile)
-		
-		
-		# create fiber trace reference (for each central wavelength)
-		# TODO: replace two calls to reduceIm with single call to reduceFlats
-		mdf = "gsifu_slits_mdf.fits"
-		logFile = "v1895_fiberTrace.log"
+		if self.steps["checkMdf"]:
+			#rawMdf = 
+			logFile = self.logRoot + "_checkMdf.log"
+			self.checkMdf(self.flatList, slits="both", rawpath=self.flatPath, \
+				bias=self.masterB, logfile=logFile)
 
-		rawFlat = "S20080405S0066"
-		#v1895_cal.reduceIm(rawFlat, slits="both", rawpath="flat/", \
-		#	fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", fl_fluxcal="no", \
-		#	fl_inter="no", fl_vardq="yes", mdffile=mdf, mdfdir="./", \
-		#	bias=masterBias, logfile=logFile, verbose="no")
-		
-		rawFlat = "S20080405S0070"
-		#v1895_cal.reduceIm(rawFlat, slits="both", rawpath="flat/", \
-		#	fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", fl_fluxcal="no", \
-		#	fl_inter="no", fl_vardq="yes", mdffile=mdf, mdfdir="./", \
-		#	bias=masterBias, logfile=logFile, verbose="no")
-		
-		
-		# determine wavelength solution for each central wavelength
-		logFile = "v1895_waveCal.log"
+		# start reducing flats and create fiber trace for each central wavelength
+		if self.steps["traceFibe"]:
+			#mdf = "gsifu_slits_mdf.fits"
+			logFile = self.logRoot + "_traceFibe.log"
 
-		arcs = ["S20080405S0109", "S20080405S0110"]
-		extFlats = ["ergS20080405S0066", "ergS20080405S0070"]
-		for i in range(2):
-			#_ = v1895_cal.reduceIm(arcs[i], slits="both", rawpath="arc/", \
-			#	fl_bias="no", fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", \
-			#	fl_fluxcal="no", fl_inter="no", mdffile=mdf, mdfdir="./", \
-			#	reference=extFlats[i], recenter="no", trace="no", \
-			#	logfile=logFile, verbose="no")
-			continue
-		
-		arcList = "@arcFiles.txt"
-		#v1895_cal.calWave("erg" + arcList, coordlist="gmos$data/GCALcuar.dat", \
-		#	fl_inter="yes", threshold=25., nlost=10, ntarget=15, \
-		#	logfile=logFile, verbose="no")
-		
-		
-		# reduce the lamp flat (incl. removal of scattered light and QE correction)
-		logFile = "v1895_subScat.log"
-		#v1895_cal.reduceFlats(self.flatList, subscat="yes", rawpath="flat/", \
-		#	slits="both", fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", \
-		#	fl_fluxcal="no", fl_inter="no", fl_vardq="yes", mdffile=mdf, \
-		#	mdfdir="./", bias=masterBias, logfile=logFile, verbose="no")
-		
-		# TODO: replace loop with call to reduceFlats
-		arc = "S20080405S0109"
-		imList = "flatFiles_473.txt"
-		logFile = "v1895_corrQE.log"
-		imPaths = utils.getImPaths(imList)
-		for im in imPaths:
-			#v1895_cal.reduceIm("brg" + im, slits="both", fl_addmdf="no", \
-			#	fl_bias="no", fl_over="no", fl_trim="no", fl_qecorr="yes", \
+			#rawFlat = "S20080405S0066"
+			#v1895_cal.reduceIm(rawFlat, slits="both", rawpath="flat/", \
 			#	fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", \
-			#	fl_extract="yes", fl_fluxcal="no", fl_inter="no", \
-			#	fl_vardq="yes", qe_refim="erg" + arc, mdffile=mdf, mdfdir='./', \
+			#	fl_fluxcal="no", fl_inter="no", fl_vardq="yes", \
+			#	mdffile=self.mdf, mdfdir="./", bias=self.masterB, \
 			#	logfile=logFile, verbose="no")
-		
-			#v1895_cal.viewCube("eqbrg" + im)
-			continue
 
-		# TODO: replace loop with call to reduceFlats
+			#rawFlat = "S20080405S0070"
+			#v1895_cal.reduceIm(rawFlat, slits="both", rawpath="flat/", \
+			#	fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", \
+			#	fl_fluxcal="no", fl_inter="no", fl_vardq="yes", \
+			#	mdffile=self.mdf, mdfdir="./", bias=self.masterB, \
+			#	logfile=logFile, verbose="no")
+
+			self.reduceFlats(flatList, slits="both", rawpath=self.flatPath, \
+				fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", \
+				fl_fluxcal="no", fl_inter="no", fl_vardq="yes", \
+				mdffile=self.mdf, mdfdir=self.mdfPath, bias=self.masterB, \
+				logfile=logFile, verbose="no")
+
+		# reduce the arcs
+		if self.steps["reducsArcs"]:
+			logFile = self.logRoot + "_reduceArcs.log"
+
+			for arc in self.arcFiles:
+				flat = utils.matchCentWave(arc, self.arcPath, self.flatList, \
+					self.flatPath)
+
+				_ = self.reduceIm(arc, slits="both", rawpath=self.arcPath, \
+					fl_bias="no", fl_gscrrej="no", fl_wavtran="no", \
+					fl_skysub="no", fl_fluxcal="no", fl_inter="no", \
+					mdffile=self.mdf, mdfdir=self.mdfPath, \
+					reference="erg" + flat, recenter="no", trace="no", \
+					logfile=logFile, verbose="no")
+
+		# determine wavelength solution for each central wavelength
+		if self.steps["calWave"]:
+			logFile = self.logRoot + "_calWave.log"
+
+			self.calWave("erg@" + self.arcList, \
+				coordlist="gmos$data/GCALcuar.dat", fl_inter="yes", \
+				threshold=25., nlost=10, ntarget=15, logfile=logFile, \
+				verbose="no")
+
+		# reduce the lamp flat, including removal of scattered light
+		if self.steps["subScatLgt"]:
+			logFile = self.logRoot + "_subScatLgt.log"
+
+			self.reduceFlats(self.flatList, subscat="yes", slits="both", \
+				rawpath=self.flatPath, fl_gscrrej="no", fl_extract="no", \
+				fl_wavtran="no", fl_skysub="no", fl_fluxcal="no", \
+				fl_inter="no", fl_vardq="yes", mdffile=self.mdf, \
+				mdfdir=self.mdfPath, bias=self.masterB, logfile=logFile, \
+				verbose="no")
+		
+		# remove QE effects and view the results
+		if self.steps["correctQE"]:
+			logFile = self.logRoot + "_correctQE.log"
+
+			self.reduceFlats(self.flatList, inPref="brg", arcList=self.arcList, \
+				arcPath=self.arcPath, slits="both", fl_addmdf="no", \
+				fl_bias="no", fl_over="no", fl_trim="no", fl_qecorr="yes", \
+				fl_gscrrej="no", fl_extract="yes", fl_wavtran="no", \
+				fl_skysub="no", fl_fluxcal="no", fl_inter="no", fl_vardq="yes", \
+				logfile=logFile, verbose="no")
+
+			#arc = "S20080405S0109"
+			#imList = "flatFiles_473.txt"
+			#imPaths = utils.getImPaths(imList)
+			#for im in imPaths:
+			#	v1895_cal.reduceIm("brg" + im, slits="both", fl_addmdf="no", \
+			#		fl_bias="no", fl_over="no", fl_trim="no", fl_qecorr="yes", \
+			#		fl_gscrrej="no", fl_wavtran="no", fl_skysub="no", \
+			#		fl_extract="yes", fl_fluxcal="no", fl_inter="no", \
+			#		fl_vardq="yes", qe_refim="erg" + arc, mdffile=self.mdf, \
+			#		mdfdir=self.mdfPath, logfile=logFile, verbose="no")
+
+			#v1895_cal.viewCube("eqbrg" + im)
+
 		arc = "S20080405S0110"
 		imList = "flatFiles_478.txt"
 		imPaths = utils.getImPaths(imList)
@@ -363,7 +403,29 @@ class ReduceIfuCals():
 
 if __name__ == "__main__":
 
-	#logFile = "v1895_reduceCals.log"
-	v1895_cal = ReduceIfuCals(biasList="biasFiles.txt", \
-		flatList="flatFiles.txt")
+	# set root filename of logs
+	target = "v1087"
+	logRoot = target + "_cal"
+
+	# setup names of raw and refined MDFs
+	rawMdf = "gsifu_slits_mdf.fits"
+	mdf = "mdf_cal.fits"
+	mdfPath = "./"
+
+	# setup ...
+	biasList = "biasFiles.txt"
+
+	flatList = "flatFiles.txt"
+
+	# declare which steps of pipeline to execute
+	pipeSteps = {}
+	pipeSteps["viewBias"] = True
+	pipeSteps["reduceBias"] = True
+	pipeSteps["viewFlat"] = True
+	pipeSteps["checkMdf"] = True
+	pipeSteps["traceFibe"] = True
+
+	# execute pipeline for calibrations
+	calObj = ReduceIfuCals(target=target, steps=pipeSteps, rawMdf=rawMdf, \
+		mdf=mdf, biasList=biasList, flatList=flatList, logRoot=logRoot)
 
